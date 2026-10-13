@@ -39,10 +39,9 @@
     }
     var key = customKey || (Lampa.TMDB && Lampa.TMDB.key ? Lampa.TMDB.key() : '');
     if (!key) return Promise.reject(new Error('В этой версии Lampa недоступен встроенный ключ TMDB. Обновите приложение.'));
-    var base = Lampa.TMDB && Lampa.TMDB.api ? Lampa.TMDB.api('') : 'https://api.themoviedb.org/3/';
-    var separator = path.indexOf('?') === -1 ? '?' : '&';
     var isAccessToken = key.indexOf('.') !== -1 || key.indexOf('eyJ') === 0;
-    var url = base.replace(/\/+$/, '/') + path + (isAccessToken ? '' : separator + 'api_key=' + encodeURIComponent(key));
+    var url = Lampa.TMDB && Lampa.TMDB.api ? Lampa.TMDB.api(path) : 'https://api.themoviedb.org/3/' + path;
+    if (!isAccessToken) url += (url.indexOf('?') === -1 ? '?' : '&') + 'api_key=' + encodeURIComponent(key);
     var network = Lampa.Reguest ? new Lampa.Reguest() : (Lampa.Network || null);
 
     if (network && network.silent) {
@@ -56,13 +55,20 @@
         }, function (error, exception) {
           var statusCode = error && Number(error.status || (network.errorCode && network.errorCode(error))) || 0;
           var body = network.errorJSON ? network.errorJSON(error) : (error && error.responseJSON) || {};
-          var detail = body.status_message || body.text || (error && (error.statusText || error.message)) || '';
+          var decoded = network.errorDecode ? network.errorDecode(error, exception) : '';
+          var detail = body.status_message || body.text || (error && (error.statusText || error.message)) || decoded || '';
+          if (!statusCode) {
+            var code = String(detail).match(/\b([45]\d\d)\b/);
+            if (code) statusCode = Number(code[1]);
+          }
           var message;
 
           if (statusCode === 401) {
             message = 'HTTP 401: TMDB отклонил ключ. Проверьте API Key v3 в настройках плагина.';
           } else if (statusCode === 403) {
             message = 'HTTP 403: доступ запрещён сервером или прокси.';
+          } else if (statusCode === 404) {
+            message = 'HTTP 404: адрес TMDB или прокси не найден. Проверьте настройки прокси TMDB в Lampa.';
           } else if (statusCode === 0) {
             message = 'Нет ответа от TMDB: проверьте VPN, сеть, DNS и прокси на телевизоре.';
           } else {
@@ -70,7 +76,6 @@
           }
 
           if (detail) message += ' Ответ: ' + String(detail).replace(/\s+/g, ' ').slice(0, 180);
-          else if (network.errorDecode) message += ' ' + network.errorDecode(error, exception);
           reject(new Error(message));
         }, false, isAccessToken ? { headers: { Authorization: 'Bearer ' + key } } : undefined);
       });
