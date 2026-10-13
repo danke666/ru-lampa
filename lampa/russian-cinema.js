@@ -20,11 +20,20 @@
   }
 
   function request(endpoint) {
+    var path = endpoint.replace(/^\/+/, '');
+    var tmdb = Lampa.Api && Lampa.Api.sources && Lampa.Api.sources.tmdb;
+
+    if (tmdb && typeof tmdb.get === 'function') {
+      return new Promise(function (resolve, reject) {
+        tmdb.get(path, {}, resolve, function () {
+          reject(new Error('Штатный запрос Lampa к TMDB завершился ошибкой. Проверьте сеть, прокси TMDB и время на устройстве.'));
+        });
+      });
+    }
+
     var key = Lampa.TMDB && Lampa.TMDB.key ? Lampa.TMDB.key() : '';
     if (!key) return Promise.reject(new Error('В этой версии Lampa недоступен встроенный ключ TMDB. Обновите приложение.'));
-
     var base = Lampa.TMDB && Lampa.TMDB.api ? Lampa.TMDB.api('') : 'https://api.themoviedb.org/3/';
-    var path = endpoint.replace(/^\/+/, '');
     var separator = path.indexOf('?') === -1 ? '?' : '&';
     var url = base.replace(/\/+$/, '/') + path + separator + 'api_key=' + encodeURIComponent(key);
     var network = Lampa.Network || (Lampa.Reguest ? new Lampa.Reguest() : null);
