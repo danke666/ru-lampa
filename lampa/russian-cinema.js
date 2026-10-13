@@ -170,6 +170,8 @@
     }
 
     function moveOrScroll(direction) {
+      if (focusAdjacentRail(direction)) return;
+
       if (Navigator.canmove(direction)) {
         Navigator.move(direction);
         return;
@@ -178,6 +180,37 @@
       var viewport = pageScroll.render()[0];
       var step = Math.max(180, Math.round(viewport.clientHeight * 0.7));
       pageScroll.wheel(direction === 'down' ? step : -step);
+    }
+
+    function focusAdjacentRail(direction) {
+      var container = pageScroll.render()[0];
+      var current = lastFocus && container.contains(lastFocus) ? lastFocus : container.querySelector('.focus');
+      var fromRail = movies.section[0].contains(current) ? movies : (series.section[0].contains(current) ? series : null);
+      var targetRail;
+      var target;
+
+      if (direction === 'down' && current && controls[0].contains(current)) {
+        targetRail = movies;
+      } else if (direction === 'up' && fromRail === movies && current.classList.contains('russian-cinema-item')) {
+        target = controls.querySelector('.selector');
+      } else if (direction === 'down' && fromRail === movies && current.classList.contains('russian-cinema-item')) {
+        targetRail = series;
+      } else if (direction === 'up' && fromRail === series && current.classList.contains('russian-cinema-item')) {
+        targetRail = movies;
+      }
+
+      if (targetRail) {
+        var sourceItems = fromRail ? fromRail.cards.find('.russian-cinema-item').toArray() : [];
+        var targetItems = targetRail.cards.find('.russian-cinema-item').toArray();
+        var sourceIndex = sourceItems.indexOf(current);
+
+        if (targetItems.length) target = targetItems[Math.min(Math.max(sourceIndex, 0), targetItems.length - 1)];
+        else target = targetRail.cards.find('.selector').get(0);
+      }
+
+      if (!target) return false;
+      Navigator.focus(target);
+      return true;
     }
 
     function createRail(type, title) {
