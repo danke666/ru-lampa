@@ -24,6 +24,9 @@
     if (Lampa.Head && Lampa.Head.addIcon) {
       Lampa.Head.addIcon(ICON, openCatalog).addClass('russian-cinema-head');
     }
+    if (Lampa.Menu && Lampa.Menu.addButton) {
+      Lampa.Menu.addButton(ICON, 'Российское кино', openCatalog).addClass('russian-cinema-menu');
+    }
   }
 
   function openCatalog() {
@@ -103,7 +106,7 @@
     var series = createRail('tv', 'Сериалы');
     var genresByType = {};
     var genreRequests = {};
-    var genreName = 'Все жанры';
+    var genreNames = [];
     var strictStudios = false;
     var year = '';
     var minRating = 0;
@@ -157,6 +160,9 @@
     };
 
     function updateCollection() {
+      var active = Lampa.Controller.enabled && Lampa.Controller.enabled();
+      if (!active || active.name !== 'content') return;
+
       var container = pageScroll.render();
       Lampa.Controller.collectionSet(container);
       var focus = lastFocus && container[0].contains(lastFocus) ? lastFocus : false;
@@ -203,125 +209,147 @@
 
     function renderControls() {
       controls.empty();
-      addFilter('Жанр: ' + genreName, selectGenre);
-      addFilter('Год: ' + (year || 'любой'), selectYear);
-      addFilter('Рейтинг: ' + (minRating ? minRating.toFixed(1) + '+' : 'любой'), selectRating);
-      addFilter('Сортировка: ' + sortLabel(sort), selectSort);
-      addFilter('Режим: ' + (strictStudios ? 'студии RU' : 'широкий'), selectProductionMode);
+      var count = genreNames.length + (year ? 1 : 0) + (minRating ? 1 : 0) + (sort !== 'popularity.desc' ? 1 : 0) + (strictStudios ? 1 : 0);
+      var button = keepInView($('<div class="russian-cinema-filter selector"></div>').text('Фильтры' + (count ? ' · ' + count : '')));
+      button.on('hover:enter', showFilterMenu);
+      controls.append(button);
+    }
 
-      var refresh = keepInView($('<div class="russian-cinema-refresh selector">Сбросить</div>'));
-      refresh.on('hover:enter', function () {
-        genreName = 'Все жанры';
-        strictStudios = false;
-        year = '';
-        minRating = 0;
-        sort = 'popularity.desc';
-        renderControls();
-        loadAll(true, true);
-      });
-      controls.append(refresh);
-
-      function addFilter(label, action) {
-        var button = keepInView($('<div class="russian-cinema-filter selector"></div>').text(label));
-        button.on('hover:enter', action);
-        controls.append(button);
-      }
-
-      function selectGenre() {
-        Promise.all([loadGenres('movie'), loadGenres('tv')]).then(function () {
-          var genres = [];
-          var names = {};
-          ['movie', 'tv'].forEach(function (mediaType) {
-            (genresByType[mediaType] || []).forEach(function (item) {
-              if (!names[item.name]) {
-                names[item.name] = true;
-                genres.push({ title: item.name, id: item.name });
-              }
-            });
-          });
-          Lampa.Select.show({
+    function showFilterMenu() {
+      Promise.all([loadGenres('movie'), loadGenres('tv')]).then(function () {
+        var options = [
+          { title: 'Показать результаты', action: 'apply' },
+          {
             title: 'Жанр',
-            items: [{ title: 'Все жанры', id: 'Все жанры' }].concat(genres),
-            onSelect: function (item) {
-              genreName = item.title;
+            subtitle: genreNames.length ? genreNames.join(', ') : 'Любой',
+            key: 'genres',
+            items: buildGenreOptions()
+          },
+          {
+            title: 'Год выпуска',
+            subtitle: year || 'Любой',
+            key: 'year',
+            items: buildSingleOptions([{ title: 'Любой год', value: '' }].concat(yearOptions()), year)
+          },
+          {
+            title: 'Рейтинг',
+            subtitle: minRating ? 'От ' + minRating.toFixed(1) : 'Любой',
+            key: 'rating',
+            items: buildSingleOptions([
+              { title: 'Любой рейтинг', value: 0 },
+              { title: 'От 5.0', value: 5 },
+              { title: 'От 6.0', value: 6 },
+              { title: 'От 7.0', value: 7 },
+              { title: 'От 8.0', value: 8 }
+            ], minRating)
+          },
+          {
+            title: 'Сортировка',
+            subtitle: sortLabel(sort),
+            key: 'sort',
+            items: buildSingleOptions([
+              { title: 'По популярности', value: 'popularity.desc' },
+              { title: 'По рейтингу', value: 'vote_average.desc' },
+              { title: 'Сначала новые', value: 'date.desc' }
+            ], sort)
+          },
+          {
+            title: 'Производство',
+            subtitle: strictStudios ? 'Российские студии' : 'Страна: Россия',
+            key: 'production',
+            items: buildSingleOptions([
+              { title: 'Страна производства: Россия', value: false },
+              { title: 'Российские студии', value: true }
+            ], strictStudios)
+          },
+          { title: 'Сбросить фильтры', action: 'reset' }
+        ];
+
+        Lampa.Select.show({
+          title: Lampa.Lang && Lampa.Lang.translate ? Lampa.Lang.translate('title_filter') : 'Фильтр',
+          items: options,
+          onBack: function () {
+            renderControls();
+            Lampa.Controller.toggle('content');
+          },
+          onSelect: function (item) {
+            if (item.action === 'apply') {
+              Lampa.Controller.toggle('content');
               renderControls();
               loadAll(true);
+            } else if (item.action === 'reset') {
+              genreNames = [];
+              year = '';
+              minRating = 0;
+              sort = 'popularity.desc';
+              strictStudios = false;
+              renderControls();
+              loadAll(true, true);
+              showFilterMenu();
+            } else {
+              showFilterSubmenu(item);
             }
-          });
+          }
         });
-      }
+      });
+    }
 
-      function selectYear() {
-        var currentYear = new Date().getFullYear();
-        var items = [{ title: 'Любой год', value: '' }];
-        for (var value = currentYear; value >= 1950; value -= 1) {
-          items.push({ title: String(value), value: String(value) });
+    function showFilterSubmenu(menu) {
+      var options = menu.items;
+      var multi = menu.key === 'genres';
+      Lampa.Select.show({
+        title: menu.title,
+        items: options,
+        onBack: function () {
+          renderControls();
+          showFilterMenu();
+        },
+        onCheck: function () {
+          genreNames = options.filter(function (item) { return item.checked; }).map(function (item) { return item.value; });
+        },
+        onSelect: function (item) {
+          if (multi) return;
+          if (menu.key === 'year') year = item.value;
+          if (menu.key === 'rating') minRating = item.value;
+          if (menu.key === 'sort') sort = item.value;
+          if (menu.key === 'production') strictStudios = item.value;
+          renderControls();
+          showFilterMenu();
         }
-        Lampa.Select.show({
-          title: 'Год выпуска',
-          items: items,
-          onSelect: function (item) {
-            year = item.value;
-            renderControls();
-            loadAll(true);
+      });
+    }
+
+    function buildGenreOptions() {
+      var genres = [];
+      var names = {};
+      ['movie', 'tv'].forEach(function (mediaType) {
+        (genresByType[mediaType] || []).forEach(function (item) {
+          if (!names[item.name]) {
+            names[item.name] = true;
+            genres.push({ title: item.name, value: item.name, checkbox: true, checked: genreNames.indexOf(item.name) >= 0 });
           }
         });
-      }
+      });
+      return genres;
+    }
 
-      function selectProductionMode() {
-        Lampa.Select.show({
-          title: 'Российское производство',
-          items: [
-            { title: 'Шире: страна производства Россия', value: false },
-            { title: 'Строго: российские студии', value: true }
-          ],
-          onSelect: function (item) {
-            strictStudios = item.value;
-            renderControls();
-            loadAll(true);
-          }
-        });
+    function yearOptions() {
+      var items = [];
+      for (var value = new Date().getFullYear(); value >= 1950; value -= 1) {
+        items.push({ title: String(value), value: String(value) });
       }
+      return items;
+    }
 
-      function selectRating() {
-        Lampa.Select.show({
-          title: 'Минимальный рейтинг',
-          items: [
-            { title: 'Любой рейтинг', value: 0 },
-            { title: 'От 5.0', value: 5 },
-            { title: 'От 6.0', value: 6 },
-            { title: 'От 7.0', value: 7 },
-            { title: 'От 8.0', value: 8 }
-          ],
-          onSelect: function (item) {
-            minRating = item.value;
-            renderControls();
-            loadAll(true);
-          }
-        });
-      }
+    function buildSingleOptions(items, selected) {
+      items.forEach(function (item) { item.selected = item.value === selected; });
+      return items;
+    }
 
-      function selectSort() {
-        Lampa.Select.show({
-          title: 'Сортировка',
-          items: [
-            { title: 'По популярности', value: 'popularity.desc' },
-            { title: 'По рейтингу', value: 'vote_average.desc' },
-            { title: 'Сначала новые', value: 'date.desc' }
-          ],
-          onSelect: function (item) {
-            sort = item.value;
-            renderControls();
-            loadAll(true);
-          }
-        });
-      }
-
-      function sortLabel(value) {
-        if (value === 'vote_average.desc') return 'по рейтингу';
-        if (value === 'date.desc') return 'сначала новые';
-        return 'по популярности';
-      }
+    function sortLabel(value) {
+      if (value === 'vote_average.desc') return 'По рейтингу';
+      if (value === 'date.desc') return 'Сначала новые';
+      return 'По популярности';
     }
 
     function loadGenres(mediaType) {
@@ -407,19 +435,17 @@
     }
 
     function getPage(mediaType, pageNumber, force) {
-      var genreId = '';
-      if (genreName !== 'Все жанры') {
-        var genre = (genresByType[mediaType] || []).filter(function (item) { return item.name === genreName; })[0];
-        if (genre) genreId = String(genre.id);
-      }
-      var cacheKey = [mediaType, pageNumber, strictStudios, genreName, year, minRating, sort].join(':');
+      var genreIds = (genresByType[mediaType] || []).filter(function (item) {
+        return genreNames.indexOf(item.name) >= 0;
+      }).map(function (item) { return String(item.id); });
+      var cacheKey = [mediaType, pageNumber, strictStudios, genreNames.slice().sort().join(','), year, minRating, sort].join(':');
       var saved = cache[cacheKey];
       if (!force && saved && Date.now() - saved.time < 15 * 60 * 1000) return Promise.resolve(saved.value);
 
       var endpoint = mediaType === 'tv' ? '/discover/tv' : '/discover/movie';
       var mediaSort = sort === 'date.desc' ? (mediaType === 'tv' ? 'first_air_date.desc' : 'primary_release_date.desc') : sort;
       var params = 'page=' + pageNumber + '&language=ru-RU&include_adult=false&sort_by=' + encodeURIComponent(mediaSort) + '&with_origin_country=RU';
-      if (genreId) params += '&with_genres=' + encodeURIComponent(genreId);
+      if (genreIds.length) params += '&with_genres=' + encodeURIComponent(genreIds.join(','));
       if (year) params += (mediaType === 'tv' ? '&first_air_date_year=' : '&primary_release_year=') + encodeURIComponent(year);
       if (minRating) params += '&vote_average.gte=' + encodeURIComponent(minRating);
 
