@@ -1,0 +1,10 @@
+{
+  "name": "ru-lampa-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Russian cinema catalog plugin for Lampa",
+  "scripts": {
+    "build": "node scripts/build.js",
+    "check": "node scripts/check.js"
+  }
+}
