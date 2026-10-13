@@ -52,7 +52,10 @@
         }, function (error) {
           var detail = error && error.responseJSON && error.responseJSON.status_message;
           var message = detail || (error && (error.decode_error || error.message)) || 'Lampa не смогла соединиться с TMDB. Проверьте подключение или прокси TMDB.';
-          if (error && Number(error.status) === 401) message = 'TMDB вернул 401: не принял ключ. В настройках плагина вставьте TMDB API Key v3 или API Read Access Token целиком.';
+          var errorText = error && (error.message || error.error || error.decode_error) || '';
+          if (error && (Number(error.status) === 401 || /\b401\b|unauthorized/i.test(errorText))) {
+            message = 'TMDB вернул 401: не принял ключ. В настройках плагина вставьте TMDB API Key v3 или API Read Access Token целиком.';
+          }
           reject(new Error(message));
         }, undefined, isAccessToken ? { headers: { Authorization: 'Bearer ' + key } } : undefined);
       });
