@@ -147,6 +147,9 @@
         },
         back: self.back
       });
+      if (!Lampa.Platform || !Lampa.Platform.screen || !Lampa.Platform.screen('tv')) {
+        window.addEventListener('keydown', onBrowserKeydown, true);
+      }
       Lampa.Controller.toggle('content');
     };
     this.back = function () { Lampa.Activity.backward(); };
@@ -154,6 +157,7 @@
     this.stop = function () {};
     this.destroy = function () {
       destroyed = true;
+      window.removeEventListener('keydown', onBrowserKeydown, true);
       pageScroll.destroy();
       movies.scroll.destroy();
       series.scroll.destroy();
@@ -180,6 +184,26 @@
       var viewport = pageScroll.render()[0];
       var step = Math.max(180, Math.round(viewport.clientHeight * 0.7));
       pageScroll.wheel(direction === 'down' ? step : -step);
+    }
+
+    function onBrowserKeydown(event) {
+      var active = Lampa.Controller.enabled && Lampa.Controller.enabled();
+      if (destroyed || event.defaultPrevented || !active || active.name !== 'content') return;
+
+      var keys = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
+      var direction = keys[event.key] || ({ 38: 'up', 40: 'down', 37: 'left', 39: 'right' })[event.keyCode];
+      if (!direction) return;
+
+      event.preventDefault();
+      event.stopImmediatePropagation();
+
+      if (direction === 'up' || direction === 'down') {
+        moveOrScroll(direction);
+      } else if (Navigator.canmove(direction)) {
+        Navigator.move(direction);
+      } else if (direction === 'left') {
+        Lampa.Controller.toggle('menu');
+      }
     }
 
     function focusAdjacentRail(direction) {
