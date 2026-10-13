@@ -32,7 +32,12 @@
 
   function request(endpoint) {
     var path = endpoint.replace(/^\/+/, '');
-    var key = Lampa.Storage.get('russian_cinema_tmdb_key', '') || (Lampa.TMDB && Lampa.TMDB.key ? Lampa.TMDB.key() : '');
+    var customKey = '';
+    if (Lampa.Storage) {
+      if (Lampa.Storage.field) customKey = Lampa.Storage.field('russian_cinema_tmdb_key') || '';
+      if (!customKey && Lampa.Storage.get) customKey = Lampa.Storage.get('russian_cinema_tmdb_key', '') || '';
+    }
+    var key = customKey || (Lampa.TMDB && Lampa.TMDB.key ? Lampa.TMDB.key() : '');
     if (!key) return Promise.reject(new Error('В этой версии Lampa недоступен встроенный ключ TMDB. Обновите приложение.'));
     var base = Lampa.TMDB && Lampa.TMDB.api ? Lampa.TMDB.api('') : 'https://api.themoviedb.org/3/';
     var separator = path.indexOf('?') === -1 ? '?' : '&';
