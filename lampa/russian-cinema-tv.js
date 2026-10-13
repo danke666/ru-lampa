@@ -133,10 +133,12 @@
           updateCollection();
         },
         up: function () {
-          moveOrScroll('up');
+          if (Navigator.canmove('up')) Navigator.move('up');
+          else Lampa.Controller.toggle('head');
         },
         down: function () {
-          moveOrScroll('down');
+          if (Navigator.canmove('down')) Navigator.move('down');
+          else pageScroll.wheel(Math.max(180, Math.round(pageScroll.render()[0].clientHeight * 0.7)));
         },
         left: function () {
           if (Navigator.canmove('left')) Navigator.move('left');
@@ -147,8 +149,8 @@
         },
         back: self.back
       });
-      if (!Lampa.Platform || !Lampa.Platform.screen || !Lampa.Platform.screen('tv')) {
-        window.addEventListener('keydown', onBrowserKeydown, true);
+      if (Lampa.Platform && Lampa.Platform.screen && Lampa.Platform.screen('tv') && Lampa.Keypad && Lampa.Keypad.listener) {
+        Lampa.Keypad.listener.follow('keydown', onTvKeydown);
       }
       Lampa.Controller.toggle('content');
     };
@@ -157,7 +159,7 @@
     this.stop = function () {};
     this.destroy = function () {
       destroyed = true;
-      window.removeEventListener('keydown', onBrowserKeydown, true);
+      if (Lampa.Keypad && Lampa.Keypad.listener) Lampa.Keypad.listener.remove('keydown', onTvKeydown);
       pageScroll.destroy();
       movies.scroll.destroy();
       series.scroll.destroy();
@@ -173,68 +175,15 @@
       Lampa.Controller.collectionFocus(focus, container);
     }
 
-    function moveOrScroll(direction) {
-      if (focusAdjacentRail(direction)) return;
-
-      if (Navigator.canmove(direction)) {
-        Navigator.move(direction);
-        return;
-      }
-
-      var viewport = pageScroll.render()[0];
-      var step = Math.max(180, Math.round(viewport.clientHeight * 0.7));
-      pageScroll.wheel(direction === 'down' ? step : -step);
-    }
-
-    function onBrowserKeydown(event) {
+    function onTvKeydown(input) {
       var active = Lampa.Controller.enabled && Lampa.Controller.enabled();
-      if (destroyed || event.defaultPrevented || !active || active.name !== 'content') return;
+      if (destroyed || !input || input.enabled === false || !active || active.name !== 'content') return;
 
-      var keys = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
-      var direction = keys[event.key] || ({ 38: 'up', 40: 'down', 37: 'left', 39: 'right' })[event.keyCode];
+      var direction = ({ 19: 'up', 20: 'down', 21: 'left', 22: 'right' })[Number(input.code)];
       if (!direction) return;
 
-      event.preventDefault();
-      event.stopImmediatePropagation();
-
-      if (direction === 'up' || direction === 'down') {
-        moveOrScroll(direction);
-      } else if (Navigator.canmove(direction)) {
-        Navigator.move(direction);
-      } else if (direction === 'left') {
-        Lampa.Controller.toggle('menu');
-      }
-    }
-
-    function focusAdjacentRail(direction) {
-      var container = pageScroll.render()[0];
-      var current = lastFocus && container.contains(lastFocus) ? lastFocus : container.querySelector('.focus');
-      var fromRail = movies.section[0].contains(current) ? movies : (series.section[0].contains(current) ? series : null);
-      var targetRail;
-      var target;
-
-      if (direction === 'down' && current && controls[0].contains(current)) {
-        targetRail = movies;
-      } else if (direction === 'up' && fromRail === movies && current.classList.contains('russian-cinema-item')) {
-        target = controls.querySelector('.selector');
-      } else if (direction === 'down' && fromRail === movies && current.classList.contains('russian-cinema-item')) {
-        targetRail = series;
-      } else if (direction === 'up' && fromRail === series && current.classList.contains('russian-cinema-item')) {
-        targetRail = movies;
-      }
-
-      if (targetRail) {
-        var sourceItems = fromRail ? fromRail.cards.find('.russian-cinema-item').toArray() : [];
-        var targetItems = targetRail.cards.find('.russian-cinema-item').toArray();
-        var sourceIndex = sourceItems.indexOf(current);
-
-        if (targetItems.length) target = targetItems[Math.min(Math.max(sourceIndex, 0), targetItems.length - 1)];
-        else target = targetRail.cards.find('.selector').get(0);
-      }
-
-      if (!target) return false;
-      Navigator.focus(target);
-      return true;
+      if (input.event && input.event.preventDefault) input.event.preventDefault();
+      Lampa.Controller.move(direction);
     }
 
     function createRail(type, title) {
