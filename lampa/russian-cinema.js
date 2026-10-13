@@ -9,6 +9,17 @@
     if (window[READY] || !window.Lampa) return;
     window[READY] = true;
 
+    Lampa.SettingsApi.addComponent({
+      component: 'russian_cinema',
+      name: 'Российское кино',
+      icon: ICON
+    });
+    Lampa.SettingsApi.addParam({
+      component: 'russian_cinema',
+      param: { name: 'russian_cinema_tmdb_key', type: 'input', default: '', values: '', placeholder: 'TMDB API Key v3' },
+      field: { name: 'TMDB API Key v3', description: 'Ключ v3 из настроек TMDB. Нужен, если встроенный ключ этой версии Lampa отклоняется. Сохраняется локально в настройках Lampa.' }
+    });
+
     Lampa.Component.add('russian_cinema_view', RussianCinemaView);
     if (Lampa.Head && Lampa.Head.addIcon) {
       Lampa.Head.addIcon(ICON, openCatalog).addClass('russian-cinema-head');
@@ -21,11 +32,12 @@
 
   function request(endpoint) {
     var path = endpoint.replace(/^\/+/, '');
-    var key = Lampa.TMDB && Lampa.TMDB.key ? Lampa.TMDB.key() : '';
+    var key = Lampa.Storage.get('russian_cinema_tmdb_key', '') || (Lampa.TMDB && Lampa.TMDB.key ? Lampa.TMDB.key() : '');
     if (!key) return Promise.reject(new Error('В этой версии Lampa недоступен встроенный ключ TMDB. Обновите приложение.'));
     var base = Lampa.TMDB && Lampa.TMDB.api ? Lampa.TMDB.api('') : 'https://api.themoviedb.org/3/';
     var separator = path.indexOf('?') === -1 ? '?' : '&';
-    var url = base.replace(/\/+$/, '/') + path + separator + 'api_key=' + encodeURIComponent(key);
+    var isAccessToken = key.indexOf('.') !== -1 || key.indexOf('eyJ') === 0;
+    var url = base.replace(/\/+$/, '/') + path + (isAccessToken ? '' : separator + 'api_key=' + encodeURIComponent(key));
     var network = Lampa.Reguest ? new Lampa.Reguest() : (Lampa.Network || null);
 
     if (network && network.silent) {
@@ -43,7 +55,7 @@
           var message;
 
           if (statusCode === 401) {
-            message = 'HTTP 401: сервер отклонил авторизацию.';
+            message = 'HTTP 401: TMDB отклонил ключ. Проверьте API Key v3 в настройках плагина.';
           } else if (statusCode === 403) {
             message = 'HTTP 403: доступ запрещён сервером или прокси.';
           } else if (statusCode === 0) {
@@ -55,14 +67,16 @@
           if (detail) message += ' Ответ: ' + String(detail).replace(/\s+/g, ' ').slice(0, 180);
           else if (network.errorDecode) message += ' ' + network.errorDecode(error, exception);
           reject(new Error(message));
-        });
+        }, false, isAccessToken ? { headers: { Authorization: 'Bearer ' + key } } : undefined);
       });
     }
 
-    return fetch(url, { headers: { accept: 'application/json' } }).then(function (response) {
+    var headers = { accept: 'application/json' };
+    if (isAccessToken) headers.Authorization = 'Bearer ' + key;
+    return fetch(url, { headers: headers }).then(function (response) {
       return response.json().then(function (data) {
         if (!response.ok) {
-          if (response.status === 401) throw new Error('TMDB вернул 401: Lampa не смогла авторизовать запрос. Проверьте обновление приложения и настройки прокси TMDB.');
+          if (response.status === 401) throw new Error('HTTP 401: TMDB отклонил ключ. Проверьте API Key v3 в настройках плагина.');
           throw new Error(data.status_message || 'TMDB вернул ошибку (' + response.status + ').');
         }
         return data;
