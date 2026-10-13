@@ -207,7 +207,16 @@
     function keepInView(element, rail) {
       element.on('hover:focus', function () {
         lastFocus = this;
-        if (rail) rail.scroll.update(this);
+        if (rail) {
+          rail.scroll.update(this);
+          if ($(this).hasClass('russian-cinema-item')) {
+            var items = rail.cards.find('.russian-cinema-item');
+            var index = items.index(this);
+            if (rail.hasMore && !rail.loading && index >= Math.max(0, items.length - 8)) {
+              loadRail(rail, false);
+            }
+          }
+        }
         pageScroll.update(rail ? rail.section[0] : this);
       });
       return element;
@@ -408,7 +417,7 @@
         found += data.items.length;
         rail.page = requestedPage + 1;
         rail.hasMore = data.hasMore;
-        if (found < pageFillTarget && rail.hasMore && pagesScanned + 1 < pageLimit) {
+        if (rail.hasMore && found < pageFillTarget && pagesScanned + 1 < pageLimit) {
           scanPages(rail, version, force, pagesScanned + 1, found);
           return;
         }
@@ -422,7 +431,6 @@
         } else {
           rail.status.text('Страна производства RU по данным TMDB.');
         }
-        if (rail.hasMore) appendMore(rail);
         updateCollection();
       }).catch(function (error) {
         showError(rail, error, version);
@@ -458,13 +466,18 @@
       return request(endpoint + '?' + params).then(function (data) {
         var candidates = Array.isArray(data.results) ? data.results : [];
         return mapInBatches(candidates, 4, function (candidate) {
-          return request('/' + mediaType + '/' + candidate.id + '?language=ru-RU').then(function (detail) {
+            return request('/' + mediaType + '/' + candidate.id + '?language=ru-RU&append_to_response=images&include_image_language=ru,en,null').then(function (detail) {
             var studios = (detail.production_companies || []).filter(function (company) {
               return company.origin_country === 'RU';
             });
             if (strictStudios && !studios.length) return null;
             var companies = strictStudios ? studios : (detail.production_companies || []);
-            return normalize(detail, mediaType, companies);
+              var posterPaths = posterPathsFor(detail, candidate);
+              detail.poster_path = posterPaths.shift() || null;
+              detail.backdrop_path = detail.backdrop_path || candidate.backdrop_path || null;
+              var normalized = normalize(detail, mediaType, companies);
+              normalized.poster_fallbacks = posterPaths;
+              return normalized;
           }).catch(function () { return null; });
         }).then(function (items) {
           var value = {
@@ -477,14 +490,33 @@
       });
     }
 
-    function appendMore(rail) {
-      var more = keepInView($('<div class="russian-cinema-action selector">Загрузить ещё</div>'), rail);
-      more.on('hover:enter', function () {
-        if (rail.loading || !rail.hasMore) return;
-        more.remove();
-        loadRail(rail, false);
+    function posterPathsFor(detail, candidate) {
+      var posters = detail.images && detail.images.posters ? detail.images.posters.slice() : [];
+      posters.sort(function (a, b) {
+        function languageRank(image) {
+          if (image.iso_639_1 === 'ru') return 0;
+          if (image.iso_639_1 === 'en') return 1;
+          if (!image.iso_639_1) return 2;
+          return 3;
+        }
+        var languageDifference = languageRank(a) - languageRank(b);
+        if (languageDifference) return languageDifference;
+        var ratingDifference = Number(b.vote_average || 0) - Number(a.vote_average || 0);
+        if (ratingDifference) return ratingDifference;
+        return Number(b.vote_count || 0) - Number(a.vote_count || 0);
       });
-      rail.cards.append(more);
+
+      var paths = [];
+      function add(path) {
+        if (path && paths.indexOf(path) === -1) paths.push(path);
+      }
+
+      add(detail.poster_path);
+      add(candidate.poster_path);
+      posters.forEach(function (poster) { add(poster.file_path); });
+      add(candidate.backdrop_path);
+      add(detail.backdrop_path);
+      return paths;
     }
 
     function renderItem(rail, item) {
@@ -493,12 +525,18 @@
       var studios = item.production_companies.map(function (company) { return company.name; }).filter(Boolean).join(', ');
       var row = keepInView($('<div class="russian-cinema-item selector"><div class="russian-cinema-poster"><div class="russian-cinema-poster-fallback">Нет постера</div><div class="russian-cinema-rating"></div></div><div class="russian-cinema-title"></div><div class="russian-cinema-meta"></div></div>'), rail);
       if (item.poster_path) {
-        var imageUrl = Lampa.TMDB && Lampa.TMDB.image ? Lampa.TMDB.image('t/p/w500' + item.poster_path) : 'https://image.tmdb.org/t/p/w500' + item.poster_path;
-        var poster = $('<img class="russian-cinema-poster-image" alt="">').attr('src', imageUrl);
+        var fallbackPaths = (item.poster_fallbacks || []).slice();
+        var poster = $('<img class="russian-cinema-poster-image" alt="">');
+        function imageUrl(path) {
+          var cleanPath = String(path || '').replace(/^\/+/, '');
+          return Lampa.TMDB && Lampa.TMDB.image ? Lampa.TMDB.image('t/p/w500/' + cleanPath) : 'https://image.tmdb.org/t/p/w500/' + cleanPath;
+        }
         poster.on('load', function () { row.find('.russian-cinema-poster-fallback').remove(); });
         poster.on('error', function () {
           if (Lampa.TMDB && Lampa.TMDB.broken) Lampa.TMDB.broken();
+          if (fallbackPaths.length) poster.attr('src', imageUrl(fallbackPaths.shift()));
         });
+        poster.attr('src', imageUrl(item.poster_path));
         row.find('.russian-cinema-poster').prepend(poster);
       }
       row.find('.russian-cinema-title').text(title);
