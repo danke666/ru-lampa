@@ -99,7 +99,7 @@
 
   function RussianCinemaView() {
     var self = this;
-    var pageScroll = new Lampa.Scroll({ mask: true, over: true });
+    var pageScroll = new Lampa.Scroll({ mask: true, over: true, scroll_by_item: true, end_ratio: 2 });
     var root = $('<div class="russian-cinema-page"></div>');
     var controls = $('<div class="russian-cinema-controls"></div>');
     var movies = createRail('movie', 'Фильмы');
@@ -220,7 +220,7 @@
         section: $('<section class="russian-cinema-rail"></section>'),
         status: $('<div class="russian-cinema-rail-status"></div>'),
         cards: $('<div class="russian-cinema-list"></div>'),
-        scroll: new Lampa.Scroll({ horizontal: true, mask: true, over: true })
+        scroll: new Lampa.Scroll({ horizontal: true, step: 300, mask: true, over: true })
       };
       var heading = $('<div class="russian-cinema-rail-title"></div>').text(title);
       rail.scroll.append(rail.cards);
