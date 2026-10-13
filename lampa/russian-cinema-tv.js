@@ -111,6 +111,7 @@
     var pageLimit = 4;
     var pageFillTarget = 12;
     var destroyed = false;
+    var lastFocus = null;
 
     this.create = function () {
       root.append(controls, movies.section, series.section);
@@ -126,14 +127,13 @@
     this.start = function () {
       Lampa.Controller.add('content', {
         toggle: function () {
-          updateCollection(true);
+          updateCollection();
         },
         up: function () {
-          if (Navigator.canmove('up')) Navigator.move('up');
-          else Lampa.Controller.toggle('head');
+          moveOrScroll('up');
         },
         down: function () {
-          if (Navigator.canmove('down')) Navigator.move('down');
+          moveOrScroll('down');
         },
         left: function () {
           if (Navigator.canmove('left')) Navigator.move('left');
@@ -156,10 +156,22 @@
       series.scroll.destroy();
     };
 
-    function updateCollection(focusFirst) {
+    function updateCollection() {
       var container = pageScroll.render();
       Lampa.Controller.collectionSet(container);
-      if (focusFirst) Lampa.Controller.collectionFocus(false, container);
+      var focus = lastFocus && container[0].contains(lastFocus) ? lastFocus : false;
+      Lampa.Controller.collectionFocus(focus, container);
+    }
+
+    function moveOrScroll(direction) {
+      if (Navigator.canmove(direction)) {
+        Navigator.move(direction);
+        return;
+      }
+
+      var viewport = pageScroll.render()[0];
+      var step = Math.max(180, Math.round(viewport.clientHeight * 0.7));
+      pageScroll.wheel(direction === 'down' ? step : -step);
     }
 
     function createRail(type, title) {
@@ -182,6 +194,7 @@
 
     function keepInView(element, rail) {
       element.on('hover:focus', function () {
+        lastFocus = this;
         if (rail) rail.scroll.update(this);
         pageScroll.update(rail ? rail.section[0] : this);
       });
@@ -337,7 +350,7 @@
         rail.hasMore = false;
         rail.cards.empty();
         var activeController = Lampa.Controller.enabled && Lampa.Controller.enabled();
-        if (activeController && activeController.name === 'content') updateCollection(true);
+        if (activeController && activeController.name === 'content') updateCollection();
       }
       rail.loading = true;
       rail.status.text('Загружаю…');
@@ -376,7 +389,7 @@
           rail.status.text('Страна производства RU по данным TMDB.');
         }
         if (rail.hasMore) appendMore(rail);
-        updateCollection(false);
+        updateCollection();
       }).catch(function (error) {
         showError(rail, error, version);
       });
@@ -390,7 +403,7 @@
       var retry = keepInView($('<div class="russian-cinema-action selector">Повторить</div>'), rail);
       retry.on('hover:enter', function () { loadRail(rail, true, true); });
       rail.cards.append(retry);
-      updateCollection(false);
+      updateCollection();
     }
 
     function getPage(mediaType, pageNumber, force) {
