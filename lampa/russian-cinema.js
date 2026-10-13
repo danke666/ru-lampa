@@ -9,17 +9,6 @@
     if (window[READY] || !window.Lampa) return;
     window[READY] = true;
 
-    Lampa.SettingsApi.addComponent({
-      component: 'russian_cinema',
-      name: 'Российское кино',
-      icon: ICON
-    });
-    Lampa.SettingsApi.addParam({
-      component: 'russian_cinema',
-      param: { name: 'russian_cinema_tmdb_key', type: 'input', default: '', values: '', placeholder: 'TMDB API Key или Read Access Token' },
-      field: { name: 'TMDB API Key или Read Access Token', description: 'Подойдут оба значения из настроек API TMDB. Read Access Token отправляется как Bearer. Значение сохраняется только в Lampa на этом устройстве.' }
-    });
-
     Lampa.Component.add('russian_cinema_view', RussianCinemaView);
     if (Lampa.Head && Lampa.Head.addIcon) {
       Lampa.Head.addIcon(ICON, openCatalog).addClass('russian-cinema-head');
@@ -31,14 +20,13 @@
   }
 
   function request(endpoint) {
-    var key = Lampa.Storage.get('russian_cinema_tmdb_key', '') || '';
-    if (!key) return Promise.reject(new Error('Добавьте TMDB API Key в настройках «Российское кино».'));
+    var key = Lampa.TMDB && Lampa.TMDB.key ? Lampa.TMDB.key() : '';
+    if (!key) return Promise.reject(new Error('В этой версии Lampa недоступен встроенный ключ TMDB. Обновите приложение.'));
 
     var base = Lampa.TMDB && Lampa.TMDB.api ? Lampa.TMDB.api('') : 'https://api.themoviedb.org/3/';
     var path = endpoint.replace(/^\/+/, '');
     var separator = path.indexOf('?') === -1 ? '?' : '&';
-    var isAccessToken = key.indexOf('.') !== -1 || key.indexOf('eyJ') === 0;
-    var url = base.replace(/\/+$/, '/') + path + (isAccessToken ? '' : separator + 'api_key=' + encodeURIComponent(key));
+    var url = base.replace(/\/+$/, '/') + path + separator + 'api_key=' + encodeURIComponent(key);
     var network = Lampa.Network || (Lampa.Reguest ? new Lampa.Reguest() : null);
 
     if (network && network.native) {
@@ -54,20 +42,18 @@
           var message = detail || (error && (error.decode_error || error.message)) || 'Lampa не смогла соединиться с TMDB. Проверьте подключение или прокси TMDB.';
           var errorText = error && (error.message || error.error || error.decode_error) || '';
           if (error && (Number(error.status) === 401 || /\b401\b|unauthorized/i.test(errorText))) {
-            message = 'TMDB вернул 401: не принял ключ. В настройках плагина вставьте TMDB API Key v3 или API Read Access Token целиком.';
+            message = 'TMDB вернул 401: Lampa не смогла авторизовать запрос. Проверьте обновление приложения и настройки прокси TMDB.';
           }
           reject(new Error(message));
-        }, undefined, isAccessToken ? { headers: { Authorization: 'Bearer ' + key } } : undefined);
+        });
       });
     }
 
-    var headers = { accept: 'application/json' };
-    if (isAccessToken) headers.Authorization = 'Bearer ' + key;
-    return fetch(url, { headers: headers }).then(function (response) {
+    return fetch(url, { headers: { accept: 'application/json' } }).then(function (response) {
       return response.json().then(function (data) {
         if (!response.ok) {
-          if (response.status === 401) throw new Error('TMDB вернул 401: не принял ключ. В настройках плагина вставьте TMDB API Key v3 или API Read Access Token целиком.');
-          throw new Error(data.status_message || 'TMDB вернул ошибку (' + response.status + '). Проверьте данные доступа.');
+          if (response.status === 401) throw new Error('TMDB вернул 401: Lampa не смогла авторизовать запрос. Проверьте обновление приложения и настройки прокси TMDB.');
+          throw new Error(data.status_message || 'TMDB вернул ошибку (' + response.status + ').');
         }
         return data;
       });
@@ -85,11 +71,14 @@
     var genresByType = {};
     var genreId = '';
     var genreName = 'Все жанры';
+    var strictStudios = false;
     var year = '';
     var minRating = 0;
     var sort = 'popularity.desc';
     var page = 1;
     var loadVersion = 0;
+    var pageLimit = 4;
+    var pageFillTarget = 18;
     var hasMore = false;
     var loading = false;
     var destroyed = false;
@@ -152,6 +141,7 @@
       });
 
       addFilter('Жанр: ' + genreName, selectGenre);
+      addFilter('Режим: ' + (strictStudios ? 'студии RU' : 'широкий'), selectProductionMode);
       addFilter('Год: ' + (year || 'любой'), selectYear);
       addFilter('Рейтинг: ' + (minRating ? minRating.toFixed(1) + '+' : 'любой'), selectRating);
       addFilter('Сортировка: ' + sortLabel(sort), selectSort);
@@ -160,6 +150,7 @@
       refresh.on('hover:enter', function () {
         genreId = '';
         genreName = 'Все жанры';
+        strictStudios = false;
         year = '';
         minRating = 0;
         sort = 'popularity.desc';
@@ -213,6 +204,21 @@
           items: items,
           onSelect: function (item) {
             year = item.value;
+            renderControls();
+            load(true);
+          }
+        });
+      }
+
+      function selectProductionMode() {
+        Lampa.Select.show({
+          title: 'Российское производство',
+          items: [
+            { title: 'Шире: страна производства Россия', value: false },
+            { title: 'Строго: российские студии', value: true }
+          ],
+          onSelect: function (item) {
+            strictStudios = item.value;
             renderControls();
             load(true);
           }
@@ -286,24 +292,40 @@
       var version = loadVersion;
       loading = true;
       status.text('Загружаю каталог…');
+      scanPages(version, force, 0, 0);
+    }
+
+    function scanPages(version, force, pagesScanned, found) {
+      if (version !== loadVersion || destroyed) return;
+      var requestedPage = page;
+      status.text('Загружаю каталог… страница ' + requestedPage);
       var result;
       try {
-        result = getPage(type, page, force);
+        result = getPage(type, requestedPage, force);
       } catch (error) {
         showError(error, version);
         return;
       }
       Promise.resolve(result).then(function (data) {
         if (version !== loadVersion) return;
-        loading = false;
         if (destroyed) return;
-        if (reset) list.empty();
         data.items.forEach(renderItem);
+        found += data.items.length;
+        page = requestedPage + 1;
         hasMore = data.hasMore;
-        if (!data.items.length && page === 1) {
-          status.text('Не нашёл карточек с подтверждённой российской студией.');
+        if (found < pageFillTarget && hasMore && pagesScanned + 1 < pageLimit) {
+          scanPages(version, force, pagesScanned + 1, found);
+          return;
+        }
+
+        loading = false;
+        var total = list.find('.russian-cinema-item').length;
+        if (!total) {
+          status.text(strictStudios ? 'Не нашёл карточек с российской студией на проверенных страницах.' : 'Не нашёл карточек с российской страной производства на проверенных страницах.');
+        } else if (strictStudios) {
+          status.text('Строгий режим: студии с отметкой RU в TMDB.');
         } else {
-          status.text('В каталоге показаны произведения с российской производственной компанией по данным TMDB.');
+          status.text('Широкий режим: страна производства RU по данным TMDB.');
         }
         if (hasMore) appendMore();
         Lampa.Controller.collectionSet(scroll.render(), scroll.render());
@@ -324,7 +346,7 @@
     }
 
     function getPage(mediaType, pageNumber, force) {
-      var cacheKey = [mediaType, pageNumber, genreId, year, minRating, sort].join(':');
+      var cacheKey = [mediaType, pageNumber, strictStudios, genreId, year, minRating, sort].join(':');
       var saved = cache[cacheKey];
       if (!force && saved && Date.now() - saved.time < 15 * 60 * 1000) return Promise.resolve(saved.value);
 
@@ -338,10 +360,11 @@
         var candidates = Array.isArray(data.results) ? data.results : [];
         return mapInBatches(candidates, 4, function (candidate) {
           return request('/' + mediaType + '/' + candidate.id + '?language=ru-RU').then(function (detail) {
-            var companies = (detail.production_companies || []).filter(function (company) {
+            var studios = (detail.production_companies || []).filter(function (company) {
               return company.origin_country === 'RU';
             });
-            if (!companies.length) return null;
+            if (strictStudios && !studios.length) return null;
+            var companies = strictStudios ? studios : (detail.production_companies || []);
             return normalize(detail, mediaType, companies);
           }).catch(function () { return null; });
         }).then(function (items) {
@@ -359,7 +382,6 @@
       var more = $('<div class="russian-cinema-action selector">Загрузить ещё</div>');
       more.on('hover:enter', function () {
         if (loading || !hasMore) return;
-        page += 1;
         more.remove();
         load(false);
       });
