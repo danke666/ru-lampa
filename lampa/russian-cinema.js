@@ -260,15 +260,23 @@
   }
 
   addStyles();
-  if (window.Lampa) start();
-  else {
-    var attempts = 0;
-    var wait = setInterval(function () {
-      attempts += 1;
-      if (window.Lampa || attempts > 80) {
-        clearInterval(wait);
-        start();
-      }
-    }, 100);
+  function bootstrap() {
+    if (!window.Lampa) {
+      setTimeout(bootstrap, 100);
+      return;
+    }
+    if (window.appready) {
+      start();
+      return;
+    }
+    if (Lampa.Listener && Lampa.Listener.follow) {
+      Lampa.Listener.follow('app', function (event) {
+        if (event.type === 'ready') start();
+      });
+      return;
+    }
+    setTimeout(bootstrap, 100);
   }
+
+  bootstrap();
 })();
