@@ -116,7 +116,6 @@
     var hasMore = false;
     var loading = false;
     var destroyed = false;
-    var lastFocus = null;
 
     this.create = function () {
       root.append(controls, status, list);
@@ -130,7 +129,7 @@
     this.start = function () {
       Lampa.Controller.add('content', {
         toggle: function () {
-          syncNavigation();
+          updateCollection(true);
         },
         up: function () {
           if (Navigator.canmove('up')) Navigator.move('up');
@@ -158,16 +157,10 @@
       scroll.destroy();
     };
 
-    function watchFocus(element) {
-      element.on('hover:focus', function () { lastFocus = this; });
-      return element;
-    }
-
-    function syncNavigation() {
+    function updateCollection(focusFirst) {
       var container = scroll.render();
       Lampa.Controller.collectionSet(container);
-      var focus = lastFocus && root[0].contains(lastFocus) ? lastFocus : false;
-      Lampa.Controller.collectionFocus(focus, container);
+      if (focusFirst) Lampa.Controller.collectionFocus(false, container);
     }
 
     function renderControls() {
@@ -176,7 +169,7 @@
         { value: 'movie', label: 'Фильмы' },
         { value: 'tv', label: 'Сериалы' }
       ].forEach(function (option) {
-        var button = watchFocus($('<div class="russian-cinema-tab selector"></div>').text(option.label));
+        var button = $('<div class="russian-cinema-tab selector"></div>').text(option.label);
         if (option.value === type) button.addClass('russian-cinema-tab--active');
         button.on('hover:enter', function () {
           if (type === option.value) return;
@@ -199,7 +192,7 @@
       addFilter('Рейтинг: ' + (minRating ? minRating.toFixed(1) + '+' : 'любой'), selectRating);
       addFilter('Сортировка: ' + sortLabel(sort), selectSort);
 
-      var refresh = watchFocus($('<div class="russian-cinema-refresh selector">Сбросить</div>'));
+      var refresh = $('<div class="russian-cinema-refresh selector">Сбросить</div>');
       refresh.on('hover:enter', function () {
         genreId = '';
         genreName = 'Все жанры';
@@ -213,7 +206,7 @@
       controls.append(refresh);
 
       function addFilter(label, action) {
-        var button = watchFocus($('<div class="russian-cinema-filter selector"></div>').text(label));
+        var button = $('<div class="russian-cinema-filter selector"></div>').text(label);
         button.on('hover:enter', action);
         controls.append(button);
       }
@@ -341,6 +334,8 @@
         page = 1;
         hasMore = false;
         list.empty();
+        var activeController = Lampa.Controller.enabled && Lampa.Controller.enabled();
+        if (activeController && activeController.name === 'content') updateCollection(true);
       }
       var version = loadVersion;
       loading = true;
@@ -381,7 +376,7 @@
           status.text('Широкий режим: страна производства RU по данным TMDB.');
         }
         if (hasMore) appendMore();
-        syncNavigation();
+        updateCollection(false);
       }).catch(function (error) {
         showError(error, version);
       });
@@ -392,10 +387,10 @@
       loading = false;
       if (destroyed) return;
       status.text(error && error.message ? error.message : 'Не удалось загрузить каталог. Проверьте соединение с TMDB и API Key.');
-      var retry = watchFocus($('<div class="russian-cinema-action selector">Повторить</div>'));
+      var retry = $('<div class="russian-cinema-action selector">Повторить</div>');
       retry.on('hover:enter', function () { load(true, true); });
       list.append(retry);
-      syncNavigation();
+      updateCollection(false);
     }
 
     function getPage(mediaType, pageNumber, force) {
@@ -432,7 +427,7 @@
     }
 
     function appendMore() {
-      var more = watchFocus($('<div class="russian-cinema-action selector">Загрузить ещё</div>'));
+      var more = $('<div class="russian-cinema-action selector">Загрузить ещё</div>');
       more.on('hover:enter', function () {
         if (loading || !hasMore) return;
         more.remove();
@@ -445,7 +440,7 @@
       var title = item.title || item.name || item.original_title || item.original_name || 'Без названия';
       var year = (item.release_date || item.first_air_date || '').slice(0, 4);
       var studios = item.production_companies.map(function (company) { return company.name; }).filter(Boolean).join(', ');
-      var row = watchFocus($('<div class="russian-cinema-item selector"><div class="russian-cinema-poster"><div class="russian-cinema-poster-fallback">Нет постера</div><div class="russian-cinema-rating"></div></div><div class="russian-cinema-title"></div><div class="russian-cinema-meta"></div></div>'));
+      var row = $('<div class="russian-cinema-item selector"><div class="russian-cinema-poster"><div class="russian-cinema-poster-fallback">Нет постера</div><div class="russian-cinema-rating"></div></div><div class="russian-cinema-title"></div><div class="russian-cinema-meta"></div></div>');
       if (item.poster_path) {
         var imageUrl = Lampa.TMDB && Lampa.TMDB.image ? Lampa.TMDB.image('t/p/w500' + item.poster_path) : 'https://image.tmdb.org/t/p/w500' + item.poster_path;
         var poster = $('<img class="russian-cinema-poster-image" alt="">').attr('src', imageUrl);
