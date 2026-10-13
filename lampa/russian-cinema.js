@@ -120,7 +120,14 @@
       }
       loading = true;
       status.text('Загружаю каталог TMDB…');
-      getPage(type, page, force).then(function (data) {
+      var result;
+      try {
+        result = getPage(type, page, force);
+      } catch (error) {
+        showError(error);
+        return;
+      }
+      Promise.resolve(result).then(function (data) {
         loading = false;
         if (destroyed) return;
         if (reset) list.empty();
@@ -134,14 +141,18 @@
         if (hasMore) appendMore();
         Lampa.Controller.collectionSet(scroll.render(), scroll.render());
       }).catch(function (error) {
-        loading = false;
-        if (destroyed) return;
-        status.text(error.message || 'Не удалось загрузить каталог.');
-        var retry = $('<div class="russian-cinema-action selector">Повторить</div>');
-        retry.on('hover:enter', function () { load(true, true); });
-        list.append(retry);
-        Lampa.Controller.collectionSet(scroll.render(), scroll.render());
+        showError(error);
       });
+    }
+
+    function showError(error) {
+      loading = false;
+      if (destroyed) return;
+      status.text(error && error.message ? error.message : 'Не удалось загрузить каталог. Проверьте соединение с TMDB и API Key.');
+      var retry = $('<div class="russian-cinema-action selector">Повторить</div>');
+      retry.on('hover:enter', function () { load(true, true); });
+      list.append(retry);
+      Lampa.Controller.collectionSet(scroll.render(), scroll.render());
     }
 
     function getPage(mediaType, pageNumber, force) {
@@ -150,15 +161,9 @@
       if (!force && saved && Date.now() - saved.time < 15 * 60 * 1000) return Promise.resolve(saved.value);
 
       var endpoint = mediaType === 'tv' ? '/discover/tv' : '/discover/movie';
-      var params = new URLSearchParams({
-        page: String(pageNumber),
-        language: 'ru-RU',
-        include_adult: 'false',
-        sort_by: 'popularity.desc',
-        with_origin_country: 'RU'
-      });
+      var params = 'page=' + pageNumber + '&language=ru-RU&include_adult=false&sort_by=popularity.desc&with_origin_country=RU';
 
-      return request(endpoint + '?' + params.toString()).then(function (data) {
+      return request(endpoint + '?' + params).then(function (data) {
         var candidates = Array.isArray(data.results) ? data.results : [];
         return mapInBatches(candidates, 4, function (candidate) {
           return request('/' + mediaType + '/' + candidate.id + '?language=ru-RU').then(function (detail) {
