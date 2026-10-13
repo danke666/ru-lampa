@@ -7,7 +7,7 @@
 1. В репозитории уже настроен workflow GitHub Actions, который публикует сайт при каждом push в `main`.
 2. В Lampa откройте **Настройки → Расширения → Добавить плагин** и вставьте URL плагина:
 
-   `https://danke666.github.io/ru-lampa/lampa/russian-cinema.js`
+   `https://danke666.github.io/ru-lampa/lampa/russian-cinema.js?v=3`
 3. Перезапустите Lampa. В верхней панели появится значок киноплёнки.
 
 Обычно плагин использует встроенный ключ TMDB из Lampa. Если TMDB отвечает `Invalid API key` или `HTTP 401`, откройте **Настройки → Российское кино**, укажите свой **API Key v3** из настроек аккаунта TMDB и перезапустите каталог. Сохранённый ключ используется только на этом устройстве и имеет приоритет над встроенным ключом Lampa. Не вводите API Read Access Token вместо API Key v3.
@@ -16,7 +16,7 @@
 
 Workflow уже опубликовал файл по адресу:
 
-`https://danke666.github.io/ru-lampa/lampa/russian-cinema.js`
+`https://danke666.github.io/ru-lampa/lampa/russian-cinema.js?v=3`
 
 Файл плагина статический; отдельный сервер или Telegram-бот не нужны.
 
