@@ -16,8 +16,8 @@
     });
     Lampa.SettingsApi.addParam({
       component: 'russian_cinema',
-      param: { name: 'russian_cinema_tmdb_key', type: 'input', default: '', values: '', placeholder: 'TMDB API Key' },
-      field: { name: 'TMDB API Key', description: 'Ключ API v3 из настроек TMDB. Ключ сохраняется в Lampa на этом устройстве.' }
+      param: { name: 'russian_cinema_tmdb_key', type: 'input', default: '', values: '', placeholder: 'TMDB API Key или Read Access Token' },
+      field: { name: 'TMDB API Key или Read Access Token', description: 'Подойдут оба значения из настроек API TMDB. Read Access Token отправляется как Bearer. Значение сохраняется только в Lampa на этом устройстве.' }
     });
 
     Lampa.Component.add('russian_cinema_view', RussianCinemaView);
@@ -37,7 +37,8 @@
     var base = Lampa.TMDB && Lampa.TMDB.api ? Lampa.TMDB.api('') : 'https://api.themoviedb.org/3/';
     var path = endpoint.replace(/^\/+/, '');
     var separator = path.indexOf('?') === -1 ? '?' : '&';
-    var url = base.replace(/\/+$/, '/') + path + separator + 'api_key=' + encodeURIComponent(key);
+    var isAccessToken = key.indexOf('.') !== -1 || key.indexOf('eyJ') === 0;
+    var url = base.replace(/\/+$/, '/') + path + (isAccessToken ? '' : separator + 'api_key=' + encodeURIComponent(key));
     var network = Lampa.Network || (Lampa.Reguest ? new Lampa.Reguest() : null);
 
     if (network && network.native) {
@@ -50,14 +51,21 @@
           }
         }, function (error) {
           var detail = error && error.responseJSON && error.responseJSON.status_message;
-          reject(new Error(detail || (error && (error.decode_error || error.message)) || 'Lampa не смогла соединиться с TMDB. Проверьте подключение или прокси TMDB.'));
-        });
+          var message = detail || (error && (error.decode_error || error.message)) || 'Lampa не смогла соединиться с TMDB. Проверьте подключение или прокси TMDB.';
+          if (error && Number(error.status) === 401) message = 'TMDB вернул 401: не принял ключ. В настройках плагина вставьте TMDB API Key v3 или API Read Access Token целиком.';
+          reject(new Error(message));
+        }, undefined, isAccessToken ? { headers: { Authorization: 'Bearer ' + key } } : undefined);
       });
     }
 
-    return fetch(url, { headers: { accept: 'application/json' } }).then(function (response) {
+    var headers = { accept: 'application/json' };
+    if (isAccessToken) headers.Authorization = 'Bearer ' + key;
+    return fetch(url, { headers: headers }).then(function (response) {
       return response.json().then(function (data) {
-        if (!response.ok) throw new Error(data.status_message || 'TMDB вернул ошибку (' + response.status + '). Проверьте API Key.');
+        if (!response.ok) {
+          if (response.status === 401) throw new Error('TMDB вернул 401: не принял ключ. В настройках плагина вставьте TMDB API Key v3 или API Read Access Token целиком.');
+          throw new Error(data.status_message || 'TMDB вернул ошибку (' + response.status + '). Проверьте данные доступа.');
+        }
         return data;
       });
     });
@@ -87,6 +95,7 @@
       root.append(controls, status, list);
       scroll.append(root);
       renderControls();
+      Lampa.Controller.collectionSet(scroll.render(), scroll.render());
       loadGenres(type);
       load(true);
       return this.render();
@@ -361,8 +370,12 @@
       var row = $('<div class="russian-cinema-item selector"><div class="russian-cinema-poster"><div class="russian-cinema-poster-fallback">Нет постера</div><div class="russian-cinema-rating"></div></div><div class="russian-cinema-title"></div><div class="russian-cinema-meta"></div></div>');
       if (item.poster_path) {
         var imageUrl = Lampa.TMDB && Lampa.TMDB.image ? Lampa.TMDB.image('t/p/w500' + item.poster_path) : 'https://image.tmdb.org/t/p/w500' + item.poster_path;
-        row.find('.russian-cinema-poster').css('background-image', 'url(' + imageUrl + ')');
-        row.find('.russian-cinema-poster-fallback').remove();
+        var poster = $('<img class="russian-cinema-poster-image" alt="">').attr('src', imageUrl);
+        poster.on('load', function () { row.find('.russian-cinema-poster-fallback').remove(); });
+        poster.on('error', function () {
+          if (Lampa.TMDB && Lampa.TMDB.broken) Lampa.TMDB.broken();
+        });
+        row.find('.russian-cinema-poster').prepend(poster);
       }
       row.find('.russian-cinema-title').text(title);
       row.find('.russian-cinema-meta').text((type === 'tv' ? 'Сериал' : 'Фильм') + (year ? ' · ' + year : '') + (studios ? ' · ' + studios : ''));
@@ -421,7 +434,7 @@
     if (document.getElementById('russian-cinema-styles')) return;
     var style = document.createElement('style');
     style.id = 'russian-cinema-styles';
-    style.textContent = '.russian-cinema-page{padding:1.4em 2.4em 3em}.russian-cinema-controls{display:flex;flex-wrap:wrap;align-items:center;gap:.45em;margin:0 0 .8em}.russian-cinema-tab,.russian-cinema-filter,.russian-cinema-refresh,.russian-cinema-action{padding:.65em .9em;background:rgba(255,255,255,.08);border-radius:.2em;white-space:nowrap}.russian-cinema-tab.focus,.russian-cinema-filter.focus,.russian-cinema-refresh.focus,.russian-cinema-action.focus{background:rgba(255,255,255,.22)}.russian-cinema-tab--active{box-shadow:inset 0 -2px currentColor}.russian-cinema-status{min-height:1.4em;font-size:.9em;opacity:.72;margin:.2em 0 .8em}.russian-cinema-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(9.2em,1fr));gap:.85em}.russian-cinema-item{min-width:0;padding:.35em;border-radius:.2em;background:rgba(255,255,255,.035)}.russian-cinema-item.focus{background:rgba(255,255,255,.17);transform:scale(1.025);z-index:1}.russian-cinema-poster{position:relative;width:100%;height:0;padding-bottom:150%;border-radius:.18em;background:#292929 center/cover no-repeat;overflow:hidden}.russian-cinema-poster-fallback{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;opacity:.45;font-size:.85em}.russian-cinema-rating{position:absolute;right:.35em;top:.35em;padding:.25em .4em;border-radius:.15em;background:rgba(0,0,0,.76);font-size:.85em;font-weight:600}.russian-cinema-title{margin:.5em .15em .15em;font-size:.95em;line-height:1.2;font-weight:600;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:2.4em}.russian-cinema-meta{margin:.15em .15em .35em;font-size:.76em;line-height:1.25;opacity:.65;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:1.9em}.russian-cinema-action{grid-column:1/-1;justify-self:start}@media(max-width:700px){.russian-cinema-page{padding:1em}.russian-cinema-list{grid-template-columns:repeat(auto-fill,minmax(7em,1fr));gap:.55em}}';
+    style.textContent = '.russian-cinema-page{padding:1.4em 2.4em 3em}.russian-cinema-controls{display:flex;flex-wrap:wrap;align-items:center;gap:.45em;margin:0 0 .8em}.russian-cinema-tab,.russian-cinema-filter,.russian-cinema-refresh,.russian-cinema-action{padding:.65em .9em;background:rgba(255,255,255,.08);border-radius:.2em;white-space:nowrap}.russian-cinema-tab.focus,.russian-cinema-filter.focus,.russian-cinema-refresh.focus,.russian-cinema-action.focus{background:rgba(255,255,255,.22)}.russian-cinema-tab--active{box-shadow:inset 0 -2px currentColor}.russian-cinema-status{min-height:1.4em;font-size:.9em;opacity:.72;margin:.2em 0 .8em}.russian-cinema-list{display:flex;flex-wrap:wrap;align-items:flex-start;gap:.85em}.russian-cinema-item{width:calc((100% - 4.25em)/6);min-width:9.2em;box-sizing:border-box;padding:.35em;border-radius:.2em;background:rgba(255,255,255,.035)}.russian-cinema-item.focus{background:rgba(255,255,255,.17);transform:scale(1.025);z-index:1}.russian-cinema-poster{position:relative;width:100%;height:0;padding-bottom:150%;border-radius:.18em;background:#292929;overflow:hidden}.russian-cinema-poster-image{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.russian-cinema-poster-fallback{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;opacity:.45;font-size:.85em}.russian-cinema-rating{position:absolute;right:.35em;top:.35em;padding:.25em .4em;border-radius:.15em;background:rgba(0,0,0,.76);font-size:.85em;font-weight:600}.russian-cinema-title{margin:.5em .15em .15em;font-size:.95em;line-height:1.2;font-weight:600;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:2.4em}.russian-cinema-meta{margin:.15em .15em .35em;font-size:.76em;line-height:1.25;opacity:.65;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:1.9em}.russian-cinema-action{width:100%;box-sizing:border-box}@media(max-width:700px){.russian-cinema-page{padding:1em}.russian-cinema-list{gap:.55em}.russian-cinema-item{width:calc((100% - 1.65em)/4);min-width:7em}}';
     document.head.appendChild(style);
   }
 
