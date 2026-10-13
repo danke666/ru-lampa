@@ -96,36 +96,33 @@
 
   function RussianCinemaView() {
     var self = this;
-    var scroll = new Lampa.Scroll({ mask: true, over: true });
+    var pageScroll = new Lampa.Scroll({ mask: true, over: true });
     var root = $('<div class="russian-cinema-page"></div>');
     var controls = $('<div class="russian-cinema-controls"></div>');
-    var status = $('<div class="russian-cinema-status"></div>');
-    var list = $('<div class="russian-cinema-list"></div>');
-    var type = 'movie';
+    var movies = createRail('movie', 'Фильмы');
+    var series = createRail('tv', 'Сериалы');
     var genresByType = {};
-    var genreId = '';
+    var genreRequests = {};
     var genreName = 'Все жанры';
     var strictStudios = false;
     var year = '';
     var minRating = 0;
     var sort = 'popularity.desc';
-    var page = 1;
-    var loadVersion = 0;
     var pageLimit = 4;
-    var pageFillTarget = 18;
-    var hasMore = false;
-    var loading = false;
+    var pageFillTarget = 12;
     var destroyed = false;
 
     this.create = function () {
-      root.append(controls, status, list);
-      scroll.append(root);
+      root.append(controls, movies.section, series.section);
+      pageScroll.append(root);
       renderControls();
-      loadGenres(type);
-      load(true);
+      loadGenres('movie').then(renderControls);
+      loadGenres('tv').then(renderControls);
+      loadRail(movies, true);
+      loadRail(series, true);
       return this.render();
     };
-    this.render = function () { return scroll.render(); };
+    this.render = function () { return pageScroll.render(); };
     this.start = function () {
       Lampa.Controller.add('content', {
         toggle: function () {
@@ -154,59 +151,60 @@
     this.stop = function () {};
     this.destroy = function () {
       destroyed = true;
-      scroll.destroy();
+      pageScroll.destroy();
+      movies.scroll.destroy();
+      series.scroll.destroy();
     };
 
     function updateCollection(focusFirst) {
-      var container = scroll.render();
+      var container = pageScroll.render();
       Lampa.Controller.collectionSet(container);
       if (focusFirst) Lampa.Controller.collectionFocus(false, container);
     }
 
-    function keepInView(element) {
-      element.on('hover:focus', function () { scroll.update(this); });
+    function createRail(type, title) {
+      var rail = {
+        type: type,
+        page: 1,
+        version: 0,
+        hasMore: false,
+        loading: false,
+        section: $('<section class="russian-cinema-rail"></section>'),
+        status: $('<div class="russian-cinema-rail-status"></div>'),
+        cards: $('<div class="russian-cinema-list"></div>'),
+        scroll: new Lampa.Scroll({ horizontal: true, mask: true, over: true })
+      };
+      var heading = $('<div class="russian-cinema-rail-title"></div>').text(title);
+      rail.scroll.append(rail.cards);
+      rail.section.append(heading, rail.status, rail.scroll.render());
+      return rail;
+    }
+
+    function keepInView(element, rail) {
+      element.on('hover:focus', function () {
+        if (rail) rail.scroll.update(this);
+        pageScroll.update(rail ? rail.section[0] : this);
+      });
       return element;
     }
 
     function renderControls() {
       controls.empty();
-      [
-        { value: 'movie', label: 'Фильмы' },
-        { value: 'tv', label: 'Сериалы' }
-      ].forEach(function (option) {
-        var button = keepInView($('<div class="russian-cinema-tab selector"></div>').text(option.label));
-        if (option.value === type) button.addClass('russian-cinema-tab--active');
-        button.on('hover:enter', function () {
-          if (type === option.value) return;
-          type = option.value;
-          if (sort.indexOf('_date.desc') !== -1) {
-            sort = type === 'tv' ? 'first_air_date.desc' : 'primary_release_date.desc';
-          }
-          genreId = '';
-          genreName = 'Все жанры';
-          renderControls();
-          loadGenres(type);
-          load(true);
-        });
-        controls.append(button);
-      });
-
       addFilter('Жанр: ' + genreName, selectGenre);
-      addFilter('Режим: ' + (strictStudios ? 'студии RU' : 'широкий'), selectProductionMode);
       addFilter('Год: ' + (year || 'любой'), selectYear);
       addFilter('Рейтинг: ' + (minRating ? minRating.toFixed(1) + '+' : 'любой'), selectRating);
       addFilter('Сортировка: ' + sortLabel(sort), selectSort);
+      addFilter('Режим: ' + (strictStudios ? 'студии RU' : 'широкий'), selectProductionMode);
 
       var refresh = keepInView($('<div class="russian-cinema-refresh selector">Сбросить</div>'));
       refresh.on('hover:enter', function () {
-        genreId = '';
         genreName = 'Все жанры';
         strictStudios = false;
         year = '';
         minRating = 0;
         sort = 'popularity.desc';
         renderControls();
-        load(true, true);
+        loadAll(true, true);
       });
       controls.append(refresh);
 
@@ -217,30 +215,26 @@
       }
 
       function selectGenre() {
-        var genres = genresByType[type] || [];
-        if (!genres.length) {
-          if (Object.prototype.hasOwnProperty.call(genresByType, type)) {
-            status.text('Не удалось загрузить жанры TMDB. Проверьте подключение и попробуйте снова.');
-            return;
-          }
-          loadGenres(type, function () {
-            var loaded = genresByType[type] || [];
-            if (loaded.length) selectGenre();
-            else status.text('Не удалось загрузить жанры TMDB. Проверьте подключение и попробуйте снова.');
+        Promise.all([loadGenres('movie'), loadGenres('tv')]).then(function () {
+          var genres = [];
+          var names = {};
+          ['movie', 'tv'].forEach(function (mediaType) {
+            (genresByType[mediaType] || []).forEach(function (item) {
+              if (!names[item.name]) {
+                names[item.name] = true;
+                genres.push({ title: item.name, id: item.name });
+              }
+            });
           });
-          return;
-        }
-        Lampa.Select.show({
-          title: 'Жанр',
-          items: [{ title: 'Все жанры', id: '' }].concat(genres.map(function (item) {
-            return { title: item.name, id: String(item.id) };
-          })),
-          onSelect: function (item) {
-            genreId = item.id;
-            genreName = item.title;
-            renderControls();
-            load(true);
-          }
+          Lampa.Select.show({
+            title: 'Жанр',
+            items: [{ title: 'Все жанры', id: 'Все жанры' }].concat(genres),
+            onSelect: function (item) {
+              genreName = item.title;
+              renderControls();
+              loadAll(true);
+            }
+          });
         });
       }
 
@@ -256,7 +250,7 @@
           onSelect: function (item) {
             year = item.value;
             renderControls();
-            load(true);
+            loadAll(true);
           }
         });
       }
@@ -271,7 +265,7 @@
           onSelect: function (item) {
             strictStudios = item.value;
             renderControls();
-            load(true);
+            loadAll(true);
           }
         });
       }
@@ -289,7 +283,7 @@
           onSelect: function (item) {
             minRating = item.value;
             renderControls();
-            load(true);
+            loadAll(true);
           }
         });
       }
@@ -300,111 +294,118 @@
           items: [
             { title: 'По популярности', value: 'popularity.desc' },
             { title: 'По рейтингу', value: 'vote_average.desc' },
-            { title: 'Сначала новые', value: type === 'tv' ? 'first_air_date.desc' : 'primary_release_date.desc' }
+            { title: 'Сначала новые', value: 'date.desc' }
           ],
           onSelect: function (item) {
             sort = item.value;
             renderControls();
-            load(true);
+            loadAll(true);
           }
         });
       }
 
       function sortLabel(value) {
         if (value === 'vote_average.desc') return 'по рейтингу';
-        if (value.indexOf('_date.desc') !== -1) return 'сначала новые';
+        if (value === 'date.desc') return 'сначала новые';
         return 'по популярности';
       }
     }
 
-    function loadGenres(mediaType, callback) {
-      if (genresByType[mediaType]) {
-        if (callback) callback();
-        return;
-      }
-      request('/genre/' + mediaType + '/list?language=ru-RU').then(function (data) {
+    function loadGenres(mediaType) {
+      if (genresByType[mediaType]) return Promise.resolve(genresByType[mediaType]);
+      if (genreRequests[mediaType]) return genreRequests[mediaType];
+      genreRequests[mediaType] = request('/genre/' + mediaType + '/list?language=ru-RU').then(function (data) {
         genresByType[mediaType] = Array.isArray(data.genres) ? data.genres : [];
-        if (mediaType === type) renderControls();
-        if (callback) callback();
+        return genresByType[mediaType];
       }).catch(function () {
-        delete genresByType[mediaType];
-        if (callback) callback();
+        genresByType[mediaType] = [];
+        return genresByType[mediaType];
       });
+      return genreRequests[mediaType];
     }
 
-    function load(reset, force) {
-      if (loading && !reset) return;
+    function loadAll(reset, force) {
+      loadRail(movies, reset, force);
+      loadRail(series, reset, force);
+    }
+
+    function loadRail(rail, reset, force) {
+      if (rail.loading && !reset) return;
       if (reset) {
-        loadVersion += 1;
-        page = 1;
-        hasMore = false;
-        list.empty();
+        rail.version += 1;
+        rail.page = 1;
+        rail.hasMore = false;
+        rail.cards.empty();
         var activeController = Lampa.Controller.enabled && Lampa.Controller.enabled();
         if (activeController && activeController.name === 'content') updateCollection(true);
       }
-      var version = loadVersion;
-      loading = true;
-      status.text('Загружаю каталог…');
-      scanPages(version, force, 0, 0);
+      rail.loading = true;
+      rail.status.text('Загружаю…');
+      scanPages(rail, rail.version, force, 0, 0);
     }
 
-    function scanPages(version, force, pagesScanned, found) {
-      if (version !== loadVersion || destroyed) return;
-      var requestedPage = page;
-      status.text('Загружаю каталог… страница ' + requestedPage);
+    function scanPages(rail, version, force, pagesScanned, found) {
+      if (version !== rail.version || destroyed) return;
+      var requestedPage = rail.page;
       var result;
       try {
-        result = getPage(type, requestedPage, force);
+        result = getPage(rail.type, requestedPage, force);
       } catch (error) {
-        showError(error, version);
+        showError(rail, error, version);
         return;
       }
       Promise.resolve(result).then(function (data) {
-        if (version !== loadVersion) return;
+        if (version !== rail.version) return;
         if (destroyed) return;
-        data.items.forEach(renderItem);
+        data.items.forEach(function (item) { renderItem(rail, item); });
         found += data.items.length;
-        page = requestedPage + 1;
-        hasMore = data.hasMore;
-        if (found < pageFillTarget && hasMore && pagesScanned + 1 < pageLimit) {
-          scanPages(version, force, pagesScanned + 1, found);
+        rail.page = requestedPage + 1;
+        rail.hasMore = data.hasMore;
+        if (found < pageFillTarget && rail.hasMore && pagesScanned + 1 < pageLimit) {
+          scanPages(rail, version, force, pagesScanned + 1, found);
           return;
         }
 
-        loading = false;
-        var total = list.find('.russian-cinema-item').length;
+        rail.loading = false;
+        var total = rail.cards.find('.russian-cinema-item').length;
         if (!total) {
-          status.text(strictStudios ? 'Не нашёл карточек с российской студией на проверенных страницах.' : 'Не нашёл карточек с российской страной производства на проверенных страницах.');
+          rail.status.text(strictStudios ? 'Нет карточек с российской студией на этих страницах.' : 'Нет карточек с российской страной производства на этих страницах.');
         } else if (strictStudios) {
-          status.text('Строгий режим: студии с отметкой RU в TMDB.');
+          rail.status.text('Российские студии по данным TMDB.');
         } else {
-          status.text('Широкий режим: страна производства RU по данным TMDB.');
+          rail.status.text('Страна производства RU по данным TMDB.');
         }
-        if (hasMore) appendMore();
+        if (rail.hasMore) appendMore(rail);
         updateCollection(false);
       }).catch(function (error) {
-        showError(error, version);
+        showError(rail, error, version);
       });
     }
 
-    function showError(error, version) {
-      if (version !== loadVersion) return;
-      loading = false;
+    function showError(rail, error, version) {
+      if (version !== rail.version) return;
+      rail.loading = false;
       if (destroyed) return;
-      status.text(error && error.message ? error.message : 'Не удалось загрузить каталог. Проверьте соединение с TMDB и API Key.');
-      var retry = keepInView($('<div class="russian-cinema-action selector">Повторить</div>'));
-      retry.on('hover:enter', function () { load(true, true); });
-      list.append(retry);
+      rail.status.text(error && error.message ? error.message : 'Не удалось загрузить каталог. Проверьте TMDB и API Key.');
+      var retry = keepInView($('<div class="russian-cinema-action selector">Повторить</div>'), rail);
+      retry.on('hover:enter', function () { loadRail(rail, true, true); });
+      rail.cards.append(retry);
       updateCollection(false);
     }
 
     function getPage(mediaType, pageNumber, force) {
-      var cacheKey = [mediaType, pageNumber, strictStudios, genreId, year, minRating, sort].join(':');
+      var genreId = '';
+      if (genreName !== 'Все жанры') {
+        var genre = (genresByType[mediaType] || []).filter(function (item) { return item.name === genreName; })[0];
+        if (genre) genreId = String(genre.id);
+      }
+      var cacheKey = [mediaType, pageNumber, strictStudios, genreName, year, minRating, sort].join(':');
       var saved = cache[cacheKey];
       if (!force && saved && Date.now() - saved.time < 15 * 60 * 1000) return Promise.resolve(saved.value);
 
       var endpoint = mediaType === 'tv' ? '/discover/tv' : '/discover/movie';
-      var params = 'page=' + pageNumber + '&language=ru-RU&include_adult=false&sort_by=' + encodeURIComponent(sort) + '&with_origin_country=RU';
+      var mediaSort = sort === 'date.desc' ? (mediaType === 'tv' ? 'first_air_date.desc' : 'primary_release_date.desc') : sort;
+      var params = 'page=' + pageNumber + '&language=ru-RU&include_adult=false&sort_by=' + encodeURIComponent(mediaSort) + '&with_origin_country=RU';
       if (genreId) params += '&with_genres=' + encodeURIComponent(genreId);
       if (year) params += (mediaType === 'tv' ? '&first_air_date_year=' : '&primary_release_year=') + encodeURIComponent(year);
       if (minRating) params += '&vote_average.gte=' + encodeURIComponent(minRating);
@@ -431,21 +432,21 @@
       });
     }
 
-    function appendMore() {
-      var more = keepInView($('<div class="russian-cinema-action selector">Загрузить ещё</div>'));
+    function appendMore(rail) {
+      var more = keepInView($('<div class="russian-cinema-action selector">Загрузить ещё</div>'), rail);
       more.on('hover:enter', function () {
-        if (loading || !hasMore) return;
+        if (rail.loading || !rail.hasMore) return;
         more.remove();
-        load(false);
+        loadRail(rail, false);
       });
-      list.append(more);
+      rail.cards.append(more);
     }
 
-    function renderItem(item) {
+    function renderItem(rail, item) {
       var title = item.title || item.name || item.original_title || item.original_name || 'Без названия';
       var year = (item.release_date || item.first_air_date || '').slice(0, 4);
       var studios = item.production_companies.map(function (company) { return company.name; }).filter(Boolean).join(', ');
-      var row = keepInView($('<div class="russian-cinema-item selector"><div class="russian-cinema-poster"><div class="russian-cinema-poster-fallback">Нет постера</div><div class="russian-cinema-rating"></div></div><div class="russian-cinema-title"></div><div class="russian-cinema-meta"></div></div>'));
+      var row = keepInView($('<div class="russian-cinema-item selector"><div class="russian-cinema-poster"><div class="russian-cinema-poster-fallback">Нет постера</div><div class="russian-cinema-rating"></div></div><div class="russian-cinema-title"></div><div class="russian-cinema-meta"></div></div>'), rail);
       if (item.poster_path) {
         var imageUrl = Lampa.TMDB && Lampa.TMDB.image ? Lampa.TMDB.image('t/p/w500' + item.poster_path) : 'https://image.tmdb.org/t/p/w500' + item.poster_path;
         var poster = $('<img class="russian-cinema-poster-image" alt="">').attr('src', imageUrl);
@@ -456,15 +457,15 @@
         row.find('.russian-cinema-poster').prepend(poster);
       }
       row.find('.russian-cinema-title').text(title);
-      row.find('.russian-cinema-meta').text((type === 'tv' ? 'Сериал' : 'Фильм') + (year ? ' · ' + year : '') + (studios ? ' · ' + studios : ''));
+      row.find('.russian-cinema-meta').text((rail.type === 'tv' ? 'Сериал' : 'Фильм') + (year ? ' · ' + year : '') + (studios ? ' · ' + studios : ''));
       if (item.vote_average) row.find('.russian-cinema-rating').text('★ ' + Number(item.vote_average).toFixed(1));
       row.on('hover:enter', function () {
         Lampa.Activity.push({
           url: '', title: title, component: 'full', id: item.id,
-          method: type, card: item, source: 'tmdb'
+          method: rail.type, card: item, source: 'tmdb'
         });
       });
-      list.append(row);
+      rail.cards.append(row);
     }
   }
 
@@ -512,7 +513,7 @@
     if (document.getElementById('russian-cinema-styles')) return;
     var style = document.createElement('style');
     style.id = 'russian-cinema-styles';
-    style.textContent = '.russian-cinema-page{padding:1.4em 2.4em 3em}.russian-cinema-controls{display:flex;flex-wrap:wrap;align-items:center;gap:.45em;margin:0 0 .8em}.russian-cinema-tab,.russian-cinema-filter,.russian-cinema-refresh,.russian-cinema-action{padding:.65em .9em;background:rgba(255,255,255,.08);border-radius:.2em;white-space:nowrap}.russian-cinema-tab.focus,.russian-cinema-filter.focus,.russian-cinema-refresh.focus,.russian-cinema-action.focus{background:rgba(255,255,255,.22);outline:3px solid #fff;outline-offset:2px;z-index:2}.russian-cinema-tab--active{box-shadow:inset 0 -2px currentColor}.russian-cinema-status{min-height:1.4em;font-size:.9em;opacity:.72;margin:.2em 0 .8em}.russian-cinema-list{display:flex;flex-wrap:wrap;align-items:flex-start;gap:.85em}.russian-cinema-item{width:calc((100% - 4.25em)/6);min-width:9.2em;box-sizing:border-box;padding:.35em;border-radius:.2em;background:rgba(255,255,255,.035)}.russian-cinema-item.focus{background:rgba(255,255,255,.17);outline:3px solid #fff;outline-offset:2px;transform:scale(1.025);z-index:2}.russian-cinema-poster{position:relative;width:100%;height:0;padding-bottom:150%;border-radius:.18em;background:#292929;overflow:hidden}.russian-cinema-poster-image{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.russian-cinema-poster-fallback{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;opacity:.45;font-size:.85em}.russian-cinema-rating{position:absolute;right:.35em;top:.35em;padding:.25em .4em;border-radius:.15em;background:rgba(0,0,0,.76);font-size:.85em;font-weight:600}.russian-cinema-title{margin:.5em .15em .15em;font-size:.95em;line-height:1.2;font-weight:600;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:2.4em}.russian-cinema-meta{margin:.15em .15em .35em;font-size:.76em;line-height:1.25;opacity:.65;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:1.9em}.russian-cinema-action{width:100%;box-sizing:border-box}@media(max-width:700px){.russian-cinema-page{padding:1em}.russian-cinema-list{gap:.55em}.russian-cinema-item{width:calc((100% - 1.65em)/4);min-width:7em}}';
+    style.textContent = '.russian-cinema-page{padding:1.4em 2.4em 3em}.russian-cinema-controls{display:flex;flex-wrap:wrap;align-items:center;gap:.45em;margin:0 0 1.1em}.russian-cinema-filter,.russian-cinema-refresh{padding:.65em .9em;background:rgba(255,255,255,.08);border-radius:.2em;white-space:nowrap}.russian-cinema-filter.focus,.russian-cinema-refresh.focus{background:rgba(255,255,255,.22);outline:3px solid #fff;outline-offset:2px;z-index:2}.russian-cinema-rail{margin:0 0 1.4em}.russian-cinema-rail-title{font-size:1.25em;font-weight:600;margin:0 0 .25em}.russian-cinema-rail-status{min-height:1.1em;font-size:.82em;opacity:.65;margin:0 0 .35em}.russian-cinema-list{display:flex;flex-flow:row nowrap;align-items:flex-start;gap:.8em;width:max-content;min-width:100%;padding:.25em .25em .65em;box-sizing:border-box}.russian-cinema-item{flex:0 0 12em;width:12em;box-sizing:border-box;padding:.35em;border-radius:.2em;background:rgba(255,255,255,.035)}.russian-cinema-item.focus{background:rgba(255,255,255,.17);outline:3px solid #fff;outline-offset:2px;transform:scale(1.025);z-index:2}.russian-cinema-action{flex:0 0 12em;width:12em;box-sizing:border-box;padding:.65em .9em;background:rgba(255,255,255,.08);white-space:nowrap}.russian-cinema-action.focus{outline:3px solid #fff;outline-offset:2px}.russian-cinema-poster{position:relative;width:100%;height:0;padding-bottom:150%;border-radius:.18em;background:#292929;overflow:hidden}.russian-cinema-poster-image{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}.russian-cinema-poster-fallback{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;opacity:.45;font-size:.85em}.russian-cinema-rating{position:absolute;right:.35em;top:.35em;padding:.25em .4em;border-radius:.15em;background:rgba(0,0,0,.76);font-size:.85em;font-weight:600}.russian-cinema-title{margin:.5em .15em .15em;font-size:.95em;line-height:1.2;font-weight:600;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:2.4em}.russian-cinema-meta{margin:.15em .15em .35em;font-size:.76em;line-height:1.25;opacity:.65;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;min-height:1.9em}@media(max-width:700px){.russian-cinema-page{padding:1em}.russian-cinema-list{gap:.55em}.russian-cinema-item,.russian-cinema-action{flex-basis:8.5em;width:8.5em}}';
     document.head.appendChild(style);
   }
 
