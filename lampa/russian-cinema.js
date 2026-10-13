@@ -147,9 +147,7 @@
         },
         back: self.back
       });
-      if (!Lampa.Platform || !Lampa.Platform.screen || !Lampa.Platform.screen('tv')) {
-        window.addEventListener('keydown', onBrowserKeydown, true);
-      }
+      window.addEventListener('keydown', onPlatformKeydown, true);
       Lampa.Controller.toggle('content');
     };
     this.back = function () { Lampa.Activity.backward(); };
@@ -157,7 +155,7 @@
     this.stop = function () {};
     this.destroy = function () {
       destroyed = true;
-      window.removeEventListener('keydown', onBrowserKeydown, true);
+      window.removeEventListener('keydown', onPlatformKeydown, true);
       pageScroll.destroy();
       movies.scroll.destroy();
       series.scroll.destroy();
@@ -186,12 +184,18 @@
       pageScroll.wheel(direction === 'down' ? step : -step);
     }
 
-    function onBrowserKeydown(event) {
+    function onPlatformKeydown(event) {
       var active = Lampa.Controller.enabled && Lampa.Controller.enabled();
       if (destroyed || event.defaultPrevented || !active || active.name !== 'content') return;
 
-      var keys = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
-      var direction = keys[event.key] || ({ 38: 'up', 40: 'down', 37: 'left', 39: 'right' })[event.keyCode];
+      var code = Number(event.keyCode || event.which || 0);
+      var isTv = Lampa.Platform && Lampa.Platform.screen && Lampa.Platform.screen('tv');
+      var direction = isTv ? ({ 19: 'up', 20: 'down', 21: 'left', 22: 'right' })[code] : null;
+
+      if (!isTv) {
+        var keys = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
+        direction = keys[event.key] || ({ 38: 'up', 40: 'down', 37: 'left', 39: 'right' })[code];
+      }
       if (!direction) return;
 
       event.preventDefault();
