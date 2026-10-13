@@ -34,8 +34,27 @@
     var key = Lampa.Storage.get('russian_cinema_tmdb_key', '') || '';
     if (!key) return Promise.reject(new Error('Добавьте TMDB API Key в настройках «Российское кино».'));
 
-    var separator = endpoint.indexOf('?') === -1 ? '?' : '&';
-    var url = 'https://api.themoviedb.org/3' + endpoint + separator + 'api_key=' + encodeURIComponent(key);
+    var base = Lampa.TMDB && Lampa.TMDB.api ? Lampa.TMDB.api('') : 'https://api.themoviedb.org/3/';
+    var path = endpoint.replace(/^\/+/, '');
+    var separator = path.indexOf('?') === -1 ? '?' : '&';
+    var url = base.replace(/\/+$/, '/') + path + separator + 'api_key=' + encodeURIComponent(key);
+    var network = Lampa.Network || (Lampa.Reguest ? new Lampa.Reguest() : null);
+
+    if (network && network.native) {
+      return new Promise(function (resolve, reject) {
+        network.native(url, function (data) {
+          if (data && data.success === false) {
+            reject(new Error(data.status_message || 'TMDB отклонил запрос. Проверьте API Key.'));
+          } else {
+            resolve(data);
+          }
+        }, function (error) {
+          var detail = error && error.responseJSON && error.responseJSON.status_message;
+          reject(new Error(detail || (error && (error.decode_error || error.message)) || 'Lampa не смогла соединиться с TMDB. Проверьте подключение или прокси TMDB.'));
+        });
+      });
+    }
+
     return fetch(url, { headers: { accept: 'application/json' } }).then(function (response) {
       return response.json().then(function (data) {
         if (!response.ok) throw new Error(data.status_message || 'TMDB вернул ошибку (' + response.status + '). Проверьте API Key.');
