@@ -31,12 +31,15 @@ function makeDom() {
   return el;
 }
 
+var scrollMinusCalls = 0;
+
 function ScrollMock() {
   return {
     append: function () {},
     render: function () { return makeDom(); },
     update: function () {},
-    destroy: function () {}
+    destroy: function () {},
+    minus: function () { scrollMinusCalls += 1; }
   };
 }
 
@@ -90,6 +93,8 @@ assert.ok(fs.readFileSync(bundlePath, 'utf8').indexOf('navigation.move') === -1)
 
 // Контроллер каталога делегирует стрелки Navigator, как src/components/main|category base в lampa-source.
 var view = new components.russian_cinema_view();
+view.create();
+assert.ok(scrollMinusCalls >= 1, 'page scroll gets viewport height via minus(), otherwise Layer never sizes it and update() is a no-op');
 view.start();
 var content = controllers.content;
 assert.ok(content, 'content controller registered');

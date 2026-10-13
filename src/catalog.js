@@ -18,6 +18,7 @@
     var filters = app.createFilters(api, keepInView, onFilterChange);
 
     this.create = function () {
+      pageScroll.minus();
       root.append(controls, movies.section, series.section);
       pageScroll.append(root);
       renderControls();
